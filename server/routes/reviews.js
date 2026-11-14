@@ -5,6 +5,7 @@ const { body } = require('express-validator');
 const validator = require('../middleware/validator');
 const {
   getReviewsByEvent,
+  checkReviewEligibility,
   createReview,
   updateReview,
   deleteReview
@@ -14,6 +15,9 @@ const router = express.Router();
 
 // Public: get reviews for an event
 router.get('/event/:eventId', getReviewsByEvent);
+
+// Protected: check review eligibility for logged-in user
+router.get('/eligibility/:eventId', protect, checkReviewEligibility);
 
 // Protected routes
 router.post(

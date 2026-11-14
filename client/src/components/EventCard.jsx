@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Calendar, MapPin, Users, Ticket, ArrowRight } from 'lucide-react';
+import { getEventStatus } from '../utils/eventStatus';
 
 const EventCard = ({ event }) => {
   const {
@@ -32,8 +33,11 @@ const EventCard = ({ event }) => {
     }
   };
 
-  const isSoldOut = availableSeats <= 0;
-  const isFewSeats = availableSeats > 0 && availableSeats <= 10;
+  const computedStatus = getEventStatus(event);
+  const isEnded = computedStatus === 'Completed';
+  const isCancelled = computedStatus === 'Cancelled';
+  const isSoldOut = !isEnded && !isCancelled && availableSeats <= 0;
+  const isFewSeats = !isEnded && !isCancelled && availableSeats > 0 && availableSeats <= 10;
 
   // Fallback banner placeholder if image is missing
   const defaultImage = "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&w=800&q=80";
@@ -72,7 +76,15 @@ const EventCard = ({ event }) => {
 
         {/* Status Pill */}
         <div className="absolute top-3 right-3">
-          {isSoldOut ? (
+          {isEnded ? (
+            <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-slate-600 text-white shadow-sm">
+              Completed
+            </span>
+          ) : isCancelled ? (
+            <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-rose-600 text-white shadow-sm">
+              Cancelled
+            </span>
+          ) : isSoldOut ? (
             <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-red-600 text-white shadow-sm">
               Sold Out
             </span>
@@ -80,9 +92,13 @@ const EventCard = ({ event }) => {
             <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-amber-500 text-white shadow-sm animate-pulse">
               Only {availableSeats} left!
             </span>
+          ) : computedStatus === 'Ongoing' ? (
+            <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-blue-600 text-white shadow-sm">
+              Ongoing
+            </span>
           ) : (
             <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-600/90 text-white shadow-sm capitalize">
-              {status || 'Upcoming'}
+              Upcoming
             </span>
           )}
         </div>
@@ -136,7 +152,7 @@ const EventCard = ({ event }) => {
             to={`/events/${_id}`}
             className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-all bg-slate-900 text-white hover:bg-brand-600 shadow-sm group-hover:shadow"
           >
-            <span>View Details & Book</span>
+            <span>{isEnded ? 'View Details' : 'View Details & Book'}</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>

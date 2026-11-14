@@ -1,10 +1,18 @@
 import axios from 'axios';
 
-// Create Axios instance with baseURL.
-// In Vite dev, '/api' is proxied to 'http://localhost:5000'
+// Normalize API base URL:
+// In local dev, defaults to '/api' (proxied by Vite to http://localhost:5000).
+// In production (Vercel/Render), handles bare origins or origins with/without trailing slashes.
+const rawBaseURL = import.meta.env.VITE_API_URL || '/api';
+const baseURL = rawBaseURL === '/api'
+  ? '/api'
+  : rawBaseURL.endsWith('/api')
+  ? rawBaseURL
+  : rawBaseURL.replace(/\/+$/, '') + '/api';
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
-  timeout: 10000,
+  baseURL,
+  timeout: 15000,
 });
 
 // Request interceptor to attach JWT token
@@ -20,7 +28,6 @@ API.interceptors.request.use(
 );
 
 // NOTE: The 401 response interceptor is registered by AuthContext so it can
-// call logout() and keep React state in sync.  Do NOT add a second one here —
-// duplicate interceptors would race and leave the UI in an inconsistent state.
+// call logout() and keep React state in sync. Do NOT add a second one here.
 
 export default API;

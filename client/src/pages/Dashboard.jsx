@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import API from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import { getEventStatus } from '../utils/eventStatus';
 import {
   Calendar,
   PlusCircle,
@@ -216,6 +217,7 @@ const Dashboard = () => {
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider border-b border-slate-100">
                 <tr>
                   <th className="px-6 py-3.5 font-bold">Event Title</th>
+                  <th className="px-6 py-3.5 font-bold">Status</th>
                   <th className="px-6 py-3.5 font-bold">Category</th>
                   <th className="px-6 py-3.5 font-bold">Venue</th>
                   <th className="px-6 py-3.5 font-bold">Seats Status</th>
@@ -227,6 +229,26 @@ const Dashboard = () => {
                 {myEvents.map((evt) => (
                   <tr key={evt._id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-6 py-4 font-bold text-slate-900">{evt.title}</td>
+                    <td className="px-6 py-4">
+                      {(() => {
+                        const evtStatus = getEventStatus(evt);
+                        return (
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                              evtStatus === 'Completed'
+                                ? 'bg-slate-100 text-slate-700'
+                                : evtStatus === 'Cancelled'
+                                ? 'bg-rose-100 text-rose-700'
+                                : evtStatus === 'Ongoing'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            {evtStatus}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-6 py-4 text-slate-600">
                       {typeof evt.category === 'object' && evt.category !== null ? evt.category.name : (evt.category || 'General')}
                     </td>

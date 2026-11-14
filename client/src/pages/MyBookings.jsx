@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import API from '../api/axios';
 import {
@@ -12,6 +12,87 @@ import {
   ArrowRight,
   RefreshCw
 } from 'lucide-react';
+
+/**
+ * Live Countdown Badge Component
+ * Displays "Expires in MM:SS" and triggers onExpire when countdown reaches 00:00.
+ */
+const BookingCountdown = ({ expiresAt, onExpire }) => {
+  const getSecondsRemaining = useCallback(() => {
+    if (!expiresAt) return 0;
+    const diff = new Date(expiresAt).getTime() - Date.now();
+    return Math.max(0, Math.floor(diff / 1000));
+  }, [expiresAt]);
+
+  const [secondsRemaining, setSecondsRemaining] = useState(getSecondsRemaining);
+  const onExpireCalledRef = useRef(false);
+
+  useEffect(() => {
+    // Reset trigger guard if expiresAt changes
+    onExpireCalledRef.current = false;
+    const current = getSecondsRemaining();
+    setSecondsRemaining(current);
+
+    if (current <= 0) {
+      if (!onExpireCalledRef.current) {
+        onExpireCalledRef.current = true;
+        onExpire?.();
+      }
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const remaining = getSecondsRemaining();
+      setSecondsRemaining(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        if (!onExpireCalledRef.current) {
+          onExpireCalledRef.current = true;
+          onExpire?.();
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [expiresAt, getSecondsRemaining, onExpire]);
+
+  const mm = String(Math.floor(secondsRemaining / 60)).padStart(2, '0');
+  const ss = String(secondsRemaining % 60).padStart(2, '0');
+  const isUrgent = secondsRemaining < 60;
+
+  if (secondsRemaining <= 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 border border-rose-300 text-rose-700 text-xs font-bold rounded-xl animate-pulse">
+        <Clock className="w-3.5 h-3.5 text-rose-600" />
+        <span>Expires in 00:00</span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+        isUrgent
+          ? 'bg-rose-50 border-rose-300 text-rose-700 animate-pulse'
+          : 'bg-amber-50 border-amber-300 text-amber-800'
+      }`}
+      title="Complete payment before timer expires to keep reserved seats"
+    >
+      <Clock className={`w-3.5 h-3.5 ${isUrgent ? 'text-rose-600' : 'text-amber-600'}`} />
+      <span>Expires in {mm}:{ss}</span>
+    </span>
+  );
+};
+
+const isBookingCancelled = (b) =>
+  b.bookingStatus === 'cancelled' ||
+  b.status === 'cancelled' ||
+  b.paymentStatus === 'expired';
+
+const isBookingPaid = (b) =>
+  b.paymentStatus === 'paid' ||
+  b.paymentStatus === 'completed';
 
 const MyBookings = () => {
   const [bookings, setBookings] = useState([]);
@@ -28,8 +109,8 @@ const MyBookings = () => {
   // Cancel action state
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
-  const fetchBookings = async () => {
-    setLoading(true);
+  const fetchBookings = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const res = await API.get('/bookings/mine');
@@ -37,13 +118,25 @@ const MyBookings = () => {
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to load your bookings.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchBookings();
   }, []);
+
+  const handleBookingExpired = (bookingId) => {
+    if (payingBooking && payingBooking._id === bookingId) {
+      setPaymentMsg('Reservation window expired. The seats have been released.');
+      setTimeout(() => {
+        setPayingBooking(null);
+        setPaymentMsg('');
+      }, 1500);
+    }
+    // Refresh bookings list so backend releases expired seats & updates status
+    fetchBookings(true);
+  };
 
   const handleCancelBooking = async (bookingId) => {
     if (!window.confirm('Are you sure you want to cancel this booking? Reserved seats will be released.')) {
@@ -52,10 +145,10 @@ const MyBookings = () => {
 
     setActionLoadingId(bookingId);
     try {
-      const res = await API.patch(`/bookings/${bookingId}/cancel`);
+      await API.patch(`/bookings/${bookingId}/cancel`);
       // Update local item
       setBookings((prev) =>
-        prev.map((b) => (b._id === bookingId ? { ...b, bookingStatus: 'cancelled' } : b))
+        prev.map((b) => (b._id === bookingId ? { ...b, bookingStatus: 'cancelled', status: 'cancelled' } : b))
       );
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to cancel booking.');
@@ -81,7 +174,9 @@ const MyBookings = () => {
       // Update local booking status
       setBookings((prev) =>
         prev.map((b) =>
-          b._id === payingBooking._id ? { ...b, paymentStatus: 'paid' } : b
+          b._id === payingBooking._id
+            ? { ...b, paymentStatus: 'paid', expiresAt: null }
+            : b
         )
       );
 
@@ -91,15 +186,20 @@ const MyBookings = () => {
         setPaymentMsg('');
       }, 1200);
     } catch (err) {
-      setPaymentMsg(err.response?.data?.message || 'Payment processing failed.');
+      const errMsg = err.response?.data?.message || 'Payment processing failed.';
+      setPaymentMsg(errMsg);
+      if (errMsg.toLowerCase().includes('expired') || errMsg.toLowerCase().includes('cancelled')) {
+        fetchBookings(true);
+      }
     } finally {
       setPaymentLoading(false);
     }
   };
 
   const filteredBookings = bookings.filter((b) => {
-    if (filter === 'confirmed') return b.bookingStatus === 'confirmed';
-    if (filter === 'cancelled') return b.bookingStatus === 'cancelled';
+    const cancelled = isBookingCancelled(b);
+    if (filter === 'confirmed') return !cancelled && (b.bookingStatus === 'confirmed' || b.status === 'confirmed');
+    if (filter === 'cancelled') return cancelled;
     return true;
   });
 
@@ -131,7 +231,7 @@ const MyBookings = () => {
         </div>
 
         <button
-          onClick={fetchBookings}
+          onClick={() => fetchBookings(false)}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -174,8 +274,9 @@ const MyBookings = () => {
         <div className="space-y-4">
           {filteredBookings.map((b) => {
             const eventData = b.event || {};
-            const isCancelled = b.bookingStatus === 'cancelled';
-            const isPaid = b.paymentStatus === 'paid';
+            const isCancelled = isBookingCancelled(b);
+            const isPaid = isBookingPaid(b);
+            const isPendingPayment = !isPaid && !isCancelled && (b.paymentStatus === 'pending' || !b.paymentStatus);
 
             return (
               <div
@@ -192,13 +293,15 @@ const MyBookings = () => {
                           : 'bg-emerald-100 text-emerald-700'
                       }`}
                     >
-                      {b.bookingStatus}
+                      {isCancelled ? 'CANCELLED' : b.bookingStatus || b.status || 'CONFIRMED'}
                     </span>
 
                     <span
-                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
                         isPaid
                           ? 'bg-blue-100 text-blue-700'
+                          : b.paymentStatus === 'expired'
+                          ? 'bg-rose-100 text-rose-700'
                           : 'bg-amber-100 text-amber-700'
                       }`}
                     >
@@ -206,7 +309,7 @@ const MyBookings = () => {
                     </span>
 
                     <span className="text-xs text-slate-400">
-                      Ref: <code className="font-mono">{b._id.slice(-6).toUpperCase()}</code>
+                      Ref: <code className="font-mono">{b._id ? b._id.slice(-6).toUpperCase() : ''}</code>
                     </span>
                   </div>
 
@@ -232,6 +335,13 @@ const MyBookings = () => {
                       <span>Booked on {formatDate(b.bookingDate)}</span>
                     </div>
                   </div>
+
+                  {isPendingPayment && b.expiresAt && (
+                    <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50/80 px-2.5 py-1 rounded-lg w-fit border border-amber-200/60">
+                      <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>Seats temporarily reserved. Complete payment before the countdown ends.</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Right: Price & Actions */}
@@ -244,8 +354,16 @@ const MyBookings = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Pay Button if not paid and not cancelled */}
-                    {!isPaid && !isCancelled && (
+                    {/* Live Countdown Timer Badge */}
+                    {isPendingPayment && b.expiresAt && (
+                      <BookingCountdown
+                        expiresAt={b.expiresAt}
+                        onExpire={() => handleBookingExpired(b._id)}
+                      />
+                    )}
+
+                    {/* Pay Button if pending payment */}
+                    {isPendingPayment && (
                       <button
                         onClick={() => setPayingBooking(b)}
                         className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-1.5"
